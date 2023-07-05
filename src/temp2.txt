@@ -1,0 +1,210 @@
+import React, { useEffect, useRef, useState } from "react";
+import { DrawingUtils, HandLandmarker } from "@mediapipe/tasks-vision";
+import { createHandLandmarker } from "./handlandmarker";
+
+const App = () => {
+  const canvasRef = useRef(null);
+  const contextRef = useRef(null);
+  const inputVideoRef = useRef(null);
+  const [recognizedGesture, setRecognizedGesture] = useState("");
+  const [recognizedFingers, setRecognizedFingers] = useState([]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const videoRef = inputVideoRef.current;
+
+    if (canvas) {
+      contextRef.current = canvas.getContext("2d");
+    }
+
+    if (contextRef.current && canvas && videoRef) {
+      createHandLandmarker().then((handLandmarker) => {
+        const drawingUtils = new DrawingUtils(contextRef.current);
+        let lastVideoTime = -1;
+        let results = undefined;
+
+        function predict() {
+          canvas.style.width = videoRef.videoWidth;
+          canvas.style.height = videoRef.videoHeight;
+          canvas.width = videoRef.videoWidth;
+          canvas.height = videoRef.videoHeight;
+
+          let startTimeMs = performance.now();
+          if (lastVideoTime !== videoRef.currentTime) {
+            lastVideoTime = videoRef.currentTime;
+            results = handLandmarker.detectForVideo(videoRef, startTimeMs);
+            recognizeGesture(results);
+          }
+
+          contextRef.current.save();
+          contextRef.current.clearRect(0, 0, canvas.width, canvas.height);
+          if (results && results.landmarks) {
+            for (const landmarks of results.landmarks) {
+              drawingUtils.drawConnectors(
+                landmarks,
+                HandLandmarker.HAND_CONNECTIONS,
+                {
+                  color: "#FFF000",
+                  lineWidth: 5,
+                }
+              );
+
+              drawingUtils.drawLandmarks(landmarks, {
+                color: "#00FF00",
+                lineWidth: 5,
+              });
+            }
+          }
+
+          // Display recognized gesture and fingers
+          contextRef.current.font = "30px Arial";
+          contextRef.current.fillStyle = "#FFFFFF";
+          contextRef.current.fillText(
+            `Recognized Gesture: ${recognizedGesture}`,
+            10,
+            30
+          );
+          contextRef.current.fillText(
+            `Recognized Fingers: ${recognizedFingers.join(", ")}`,
+            10,
+            60
+          );
+          contextRef.current.restore();
+
+          window.requestAnimationFrame(predict);
+        }
+
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+          videoRef.srcObject = stream;
+          videoRef.addEventListener("loadeddata", predict);
+        });
+      });
+    }
+  }, []);
+
+  const recognizeGesture = (results) => {
+    if (results && results.landmarks && results.landmarks.length > 0) {
+      const landmarks = results.landmarks[0]; // Assuming only one hand is detected
+
+      if (landmarks.length >= 21) {
+        const thumbTip = landmarks[4]; // Thumb tip landmark
+        const indexTip = landmarks[8]; // Index finger tip landmark
+        const middleTip = landmarks[12]; // Middle finger tip landmark
+        const ringTip = landmarks[16]; // Ring finger tip landmark
+        const pinkyTip = landmarks[20]; // Pinky finger tip landmark
+
+        // Calculate x and y coordinates of fingertips
+        const thumbX = thumbTip.x;
+        const thumbY = thumbTip.y;
+        const indexX = indexTip.x;
+        const indexY = indexTip.y;
+        const middleX = middleTip.x;
+        const middleY = middleTip.y;
+        const ringX = ringTip.x;
+        const ringY = ringTip.y;
+        const pinkyX = pinkyTip.x;
+        const pinkyY = pinkyTip.y;
+
+        // Distance thresholds to classify a finger as raised (adjust as needed)
+        const raisedThresholdX = 0.02;
+        const raisedThresholdY = 0.04;
+
+        // Check if fingers are raised or not
+        const isThumbRaised =
+          thumbY < indexY - raisedThresholdY &&
+          thumbY < middleY - raisedThresholdY &&
+          thumbY < ringY - raisedThresholdY &&
+          thumbY < pinkyY - raisedThresholdY;
+        const isIndexRaised =
+          indexY < thumbY - raisedThresholdY &&
+          indexY < middleY - raisedThresholdY &&
+          indexY < ringY - raisedThresholdY &&
+          indexY < pinkyY - raisedThresholdY;
+        const isMiddleRaised =
+          middleY < thumbY - raisedThresholdY &&
+          middleY < indexY - raisedThresholdY &&
+          middleY < ringY - raisedThresholdY &&
+          middleY < pinkyY - raisedThresholdY;
+        const isRingRaised =
+          ringY < thumbY - raisedThresholdY &&
+          ringY < indexY - raisedThresholdY &&
+          ringY < middleY - raisedThresholdY &&
+          ringY < pinkyY - raisedThresholdY;
+        const isPinkyRaised =
+          pinkyY < thumbY - raisedThresholdY &&
+          pinkyY < indexY - raisedThresholdY &&
+          pinkyY < middleY - raisedThresholdY &&
+          pinkyY < ringY - raisedThresholdY;
+
+        // Distance threshold to classify fingers as wide apart (adjust as needed)
+        const wideThreshold = 0.06;
+
+        // Check if fingers are wide apart or not
+        const isThumbIndexWide = Math.abs(thumbX - indexX) > wideThreshold;
+        const isIndexMiddleWide = Math.abs(indexX - middleX) > wideThreshold;
+        const isMiddleRingWide = Math.abs(middleX - ringX) > wideThreshold;
+        const isRingPinkyWide = Math.abs(ringX - pinkyX) > wideThreshold;
+
+        // Perform gesture recognition
+        let recognizedGesture = "";
+        if (
+          isIndexRaised &&
+          isMiddleRaised &&
+          !isRingRaised &&
+          !isPinkyRaised &&
+          isThumbIndexWide
+        ) {
+          recognizedGesture = "V";
+        } else if (
+          isThumbRaised &&
+          isIndexRaised &&
+          isMiddleRaised &&
+          isRingRaised &&
+          isPinkyRaised
+        ) {
+          recognizedGesture = "W";
+        } else if (
+          !isThumbRaised &&
+          isIndexRaised &&
+          isMiddleRaised &&
+          isRingRaised &&
+          !isPinkyRaised
+        ) {
+          recognizedGesture = "U";
+        } else if (
+          !isThumbRaised &&
+          !isIndexRaised &&
+          !isMiddleRaised &&
+          isRingRaised &&
+          isPinkyRaised
+        ) {
+          recognizedGesture = "C";
+        }
+        setRecognizedGesture(recognizedGesture);
+      }
+    }
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <video
+        id="webcam"
+        style={{ position: "absolute" }}
+        autoPlay
+        playsInline
+        ref={inputVideoRef}
+      ></video>
+      <canvas
+        ref={canvasRef}
+        id="output_canvas"
+        style={{
+          position: "absolute",
+          left: "0px",
+          top: "0px",
+        }}
+      ></canvas>
+    </div>
+  );
+};
+
+export default App;

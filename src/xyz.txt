@@ -1,0 +1,134 @@
+mport React, { useState } from "react";
+import { createHandLandmarker } from "./handlandmarker";
+import { DrawingUtils, HandLandmarker } from "@mediapipe/tasks-vision";
+
+function App() {
+  const canvasRef = React.useRef(null);
+  const contextRef = React.useRef(null);
+  const inputVideoRef = React.useRef(null);
+  const [angle, setAngle] = useState(null); // State to hold the angle value
+
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    const videoRef = inputVideoRef.current;
+
+    if (canvas) {
+      contextRef.current = canvas.getContext("2d");
+    }
+
+    if (contextRef.current && canvas && videoRef) {
+      createHandLandmarker().then((handLandmarker) => {
+        const drawingUtils = new DrawingUtils(contextRef.current);
+        let lastVideoTime = -1;
+        let results = undefined;
+
+        function calculateAngle(landmark1, landmark2, landmark3) {
+          const x1 = landmark1.x;
+          const y1 = landmark1.y;
+          const x2 = landmark2.x;
+          const y2 = landmark2.y;
+          const x3 = landmark3.x;
+          const y3 = landmark3.y;
+
+          const radians =
+            Math.atan2(y3 - y2, x3 - x2) - Math.atan2(y1 - y2, x1 - x2);
+          let angle = radians * (180 / Math.PI);
+          angle = angle < 0 ? angle + 360 : angle; // Convert negative angles to positive
+
+          return angle;
+        }
+
+        function predict() {
+          canvas.style.width = videoRef.videoWidth;
+          canvas.style.height = videoRef.videoHeight;
+          canvas.width = videoRef.videoWidth;
+          canvas.height = videoRef.videoHeight;
+          let startTimeMs = performance.now();
+          if (lastVideoTime !== videoRef.currentTime) {
+            lastVideoTime = videoRef.currentTime;
+            results = handLandmarker.detectForVideo(videoRef, startTimeMs);
+            console.log(results);
+          }
+          contextRef.current.save();
+          contextRef.current.clearRect(0, 0, canvas.width, canvas.height);
+
+          for (const landmarks of results.landmarks) {
+            if (results.landmarks) {
+              drawingUtils.drawConnectors(
+                landmarks,
+                HandLandmarker.HAND_CONNECTIONS,
+                {
+                  color: "#00FF00",
+                  lineWidth: 5,
+                }
+              );
+
+              drawingUtils.drawLandmarks(landmarks, {
+                color: "#ff0000",
+                lineWidth: 2,
+              });
+
+              const indexFingerLandmarks = landmarks.slice(5, 9); // Assuming landmarks 5 to 8 represent the index finger joints
+              const angle = calculateAngle(
+                indexFingerLandmarks[0],
+                indexFingerLandmarks[1],
+                indexFingerLandmarks[2]
+              );
+              console.log("Index finger angle:", angle);
+              setAngle(angle.toFixed(2)); // Set the angle value in the state with 2 decimal places
+            }
+          }
+          window.requestAnimationFrame(predict);
+        }
+
+        navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+          videoRef.srcObject = stream;
+          videoRef.addEventListener("loadeddata", predict);
+        });
+      });
+    }
+
+    return () => {
+      // Clean up any resources or event listeners if needed
+    };
+  }, []);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <video
+        id="webcam"
+        style={{ position: "absolute" }}
+        autoPlay
+        playsInline
+        ref={inputVideoRef}
+      ></video>
+      <canvas
+        ref={canvasRef}
+        id="output_canvas"
+        style={{
+          position: "absolute",
+          left: "0px",
+          top: "0px",
+        }}
+      ></canvas>
+      {/* Display the angle on the screen */}
+      {angle && (
+        <div
+          style={{
+            position: "absolute",
+            top: "10px",
+            left: "10px",
+            backgroundColor: "#ffffff",
+            padding: "5px",
+            fontSize: "18px",
+            fontWeight: "bold",
+          }}
+        >
+          Index Finger Angle: {angle}°
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
